@@ -155,10 +155,43 @@ body{font-family:'IBM Plex Sans','Segoe UI',sans-serif;background:#f0f2f5;min-he
 /* Toggle switch */
 .toggle{width:48px;height:26px;border-radius:13px;cursor:pointer;position:relative;transition:background .2s;flex-shrink:0}
 .toggle-knob{width:22px;height:22px;border-radius:11px;background:#fff;position:absolute;top:2px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.ab-print{background:#f0f4f8;color:#34495e}
+
+/* ── PRINT STYLES ── */
+@media print {
+  body { background: #fff !important; }
+  .nti-nav, .nti-main > *:not(#print-area) { display: none !important; }
+  #print-area { display: block !important; }
+  @page { margin: 0.5in; size: letter portrait; }
+}
+#print-area { display: none; }
+/* Print WO layout */
+.print-wo { font-family: 'IBM Plex Sans', Arial, sans-serif; color: #000; max-width: 100%; }
+.print-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #1a2332; padding-bottom: 12px; margin-bottom: 14px; }
+.print-company { font-size: 22px; font-weight: 700; letter-spacing: 1px; color: #1a2332; }
+.print-wo-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-top: 2px; }
+.print-wo-num { font-family: 'IBM Plex Mono', monospace; font-size: 28px; font-weight: 700; color: #e67e22; }
+.print-meta { display: flex; gap: 32px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #ddd; }
+.print-meta-item label { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #888; display: block; margin-bottom: 2px; }
+.print-meta-item span { font-size: 15px; font-weight: 600; color: #1a2332; }
+.print-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 14px; }
+.print-table th { background: #1a2332; color: #fff; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; font-weight: 600; }
+.print-table td { padding: 7px 8px; border-bottom: 1px solid #e8ecf0; vertical-align: top; }
+.print-table tr:nth-child(even) td { background: #f8f9fa; }
+.print-table .r { text-align: right; }
+.print-table .bold { font-weight: 700; }
+.print-total-row { display: flex; justify-content: flex-end; align-items: baseline; gap: 16px; border-top: 2px solid #1a2332; padding-top: 10px; margin-bottom: 24px; }
+.print-total-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: #666; }
+.print-total-amt { font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 700; color: #1a2332; }
+.print-notes { font-size: 12px; color: #333; margin-bottom: 14px; padding: 8px 12px; background: #f8f9fa; border-left: 3px solid #e67e22; border-radius: 0 4px 4px 0; }
+.print-footer { border-top: 1px solid #ddd; padding-top: 10px; display: flex; justify-content: space-between; font-size: 10px; color: #888; }
+.print-sig { margin-top: 32px; display: flex; gap: 48px; }
+.print-sig-line { flex: 1; border-top: 1px solid #333; padding-top: 4px; font-size: 10px; color: #555; }
 </style>
 </head>
 <body>
 <div id="root"><div class="loader">Loading NTI Work Orders…</div></div>
+<div id="print-area"></div>
 
 <script type="text/babel">
 const { useState, useEffect, useCallback, useRef } = React;
@@ -507,8 +540,71 @@ async function sendEmail(wo, recipients, ccEmail){
   return resp.json();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// AUTOCOMPLETE
+// ─── PRINT WO ─────────────────────────────────────────────────────────────────
+function printWO(wo) {
+  const total = wTotal(wo);
+  const linesHTML = (wo.lines||[]).map((l,i) => `
+    <tr>
+      <td>${l.unitNo||'—'}</td>
+      <td>${l.position||'—'}</td>
+      <td style="font-family:'IBM Plex Mono',monospace;font-weight:600">${l.tireSize||'—'}</td>
+      <td>${l.make||'—'}</td>
+      <td style="font-family:'IBM Plex Mono',monospace;font-size:10px">${l.serialNo||'—'}</td>
+      <td style="font-family:'IBM Plex Mono',monospace;font-size:10px">${l.brNo||'—'}</td>
+      <td style="font-family:'IBM Plex Mono',monospace;font-size:10px">${l.rimNo||'—'}</td>
+      <td style="font-weight:600;color:#e67e22">${l.serviceType}</td>
+      <td class="r">${l.qty}</td>
+      <td class="r">${$f(l.rate)}</td>
+      <td class="r bold">${$f(lTotal(l))}</td>
+    </tr>`).join('');
+
+  const html = `
+    <div class="print-wo">
+      <div class="print-header">
+        <div>
+          <div class="print-company">NORTHERN TIRE, INC.</div>
+          <div class="print-wo-label">Work Order</div>
+        </div>
+        <div class="print-wo-num">#${wo.id}</div>
+      </div>
+      <div class="print-meta">
+        <div class="print-meta-item"><label>Customer</label><span>${wo.customer}</span></div>
+        <div class="print-meta-item"><label>Date</label><span>${wo.date}</span></div>
+        <div class="print-meta-item"><label>Technician</label><span>${wo.technician||'Jeremy Forbes'}</span></div>
+        <div class="print-meta-item"><label>Status</label><span>${wo.status==='open'?'Open':'Invoiced #'+wo.invoiceNo}</span></div>
+      </div>
+      <table class="print-table">
+        <thead><tr>
+          <th>Unit #</th><th>Pos</th><th>Tire Size</th><th>Make</th>
+          <th>Serial #</th><th>Br#</th><th>Rim#</th>
+          <th>Service</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Total</th>
+        </tr></thead>
+        <tbody>${linesHTML}</tbody>
+      </table>
+      ${wo.notes?`<div class="print-notes"><strong>Notes:</strong> ${wo.notes}</div>`:''}
+      <div class="print-total-row">
+        <span class="print-total-label">Work Order Total</span>
+        <span class="print-total-amt">${$f(total)}</span>
+      </div>
+      <div class="print-sig">
+        <div class="print-sig-line">Customer Signature / Approval</div>
+        <div class="print-sig-line">Date</div>
+        <div class="print-sig-line">NTI Technician</div>
+      </div>
+      <div class="print-footer">
+        <span>Northern Tire, Inc. · northerntireinc@gmail.com</span>
+        <span>Customer prior approval is required for repairs.</span>
+      </div>
+    </div>`;
+
+  const el = document.getElementById('print-area');
+  el.innerHTML = html;
+  el.style.display = 'block';
+  window.print();
+  setTimeout(() => { el.innerHTML = ''; el.style.display = 'none'; }, 1000);
+}
+
+// ─── AUTOCOMPLETE
 // ═══════════════════════════════════════════════════════════════════════════════
 function AcInput({value,onChange,options,placeholder,monoFont}){
   const [open,setOpen]=useState(false);
@@ -717,8 +813,8 @@ function App(){
       {toast&&<div className={`nti-toast ${toast.type}`}>{toast.msg}</div>}
 
       <div className="nti-main">
-        {view==="dash"     && <Dashboard wos={wos} sending={sending} onEdit={openEdit} onDelete={deleteWO} onExport={downloadCSV} onResend={triggerEmail} autoEmail={settings.autoEmail}/>}
-        {view==="edit"     && editWO && <WOForm wo={editWO} onSave={saveWO} onCancel={()=>{setView("dash");setEditWO(null);}} autoEmail={settings.autoEmail}/>}
+        {view==="dash"     && <Dashboard wos={wos} sending={sending} onEdit={openEdit} onDelete={deleteWO} onExport={downloadCSV} onResend={triggerEmail} onPrint={printWO} autoEmail={settings.autoEmail}/>}
+        {view==="edit"     && editWO && <WOForm wo={editWO} onSave={saveWO} onCancel={()=>{setView("dash");setEditWO(null);}} onPrint={printWO} autoEmail={settings.autoEmail}/>}
         {view==="invoices" && <InvoicesView wos={wos} onExport={downloadCSV} onMarkInvoiced={markInvoiced} onEdit={openEdit}/>}
         {view==="settings" && <SettingsView settings={settings} onSave={saveSettings}/>}
       </div>
@@ -727,7 +823,7 @@ function App(){
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({wos,sending,onEdit,onDelete,onExport,onResend,autoEmail}){
+function Dashboard({wos,sending,onEdit,onDelete,onExport,onResend,onPrint,autoEmail}){
   const open=wos.filter(w=>w.status==="open");
   const inv=wos.filter(w=>w.status==="invoiced");
   const sorted=[...wos].sort((a,b)=>Number(b.id)-Number(a.id));
@@ -771,6 +867,7 @@ function Dashboard({wos,sending,onEdit,onDelete,onExport,onResend,autoEmail}){
                     </td>
                     <td className="right" style={{whiteSpace:"nowrap"}}>
                       <button className="action-btn ab-blue"  onClick={()=>onEdit(wo)}>Edit</button>
+                      <button className="action-btn ab-print" onClick={()=>onPrint(wo)}>🖨</button>
                       <button className="action-btn ab-green" onClick={()=>onExport([wo])}>QBO</button>
                       <button className="action-btn ab-email" onClick={()=>onResend(wo)}>📧</button>
                       <button className="action-btn ab-red"   onClick={()=>onDelete(wo.id)}>✕</button>
@@ -788,7 +885,7 @@ function Dashboard({wos,sending,onEdit,onDelete,onExport,onResend,autoEmail}){
 function StatCard({label,value,accent}){return(<div className="stat-card" style={{borderTopColor:accent}}><div className="stat-label">{label}</div><div className="stat-value" style={{color:accent}}>{value}</div></div>);}
 
 // ─── WORK ORDER FORM ──────────────────────────────────────────────────────────
-function WOForm({wo,onSave,onCancel,autoEmail}){
+function WOForm({wo,onSave,onCancel,onPrint,autoEmail}){
   const [form,setForm]=useState(wo);
   const setF=(k,v)=>setForm(f=>({...f,[k]:v}));
 
@@ -868,6 +965,7 @@ function WOForm({wo,onSave,onCancel,autoEmail}){
 
           <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}>
             <button className="btn-ghost" onClick={onCancel}>Cancel</button>
+            <button className="btn-ghost" onClick={()=>onPrint(form)} style={{color:"#34495e"}}>🖨 Print</button>
             <button className="btn-primary" onClick={()=>onSave(form)}>Save &amp; Send WO</button>
           </div>
         </div>
