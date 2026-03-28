@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NTI Work Orders</title>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+  SETUP INSTRUCTIONS
+  ════════════════════════════════════════════════════════════════════
+
+  1. CREATE SUPABASE TABLE
+     Go to your Supabase project → SQL Editor → run this:
+
+     create table work_orders (
+       id          text primary key,
+       date        text not null,
+       customer    text not null,
+       lines       jsonb not null default '[]',
+       status      text not null default 'open',
+       invoice_no  text default '',
+       notes       text default '',
+       created_at  bigint,
+       email_sent  boolean default false
+     );
+
+     -- Enable Row Level Security (open read/write for now):
+     alter table work_orders enable row level security;
+     create policy "Allow all" on work_orders for all using (true) with check (true);
+
+  2. FILL IN YOUR SUPABASE CREDENTIALS BELOW
+
+  3. DEPLOY TO GITHUB PAGES
+     - Create repo: nti-work-orders (or any name)
+     - Upload this file as index.html
+     - Settings → Pages → Branch: main, folder: / (root)
+     - Share the URL with your team
+
+═══════════════════════════════════════════════════════════════════ -->
+
+<script>
+  // ── CONFIGURE THESE ────────────────────────────────────────────────
+  const SUPABASE_URL  = 'https://YOUR_PROJECT.supabase.co';
+  const SUPABASE_KEY  = 'YOUR_ANON_KEY';
+  const STARTING_WO   = 40000;   // first WO number (only used on first load)
+  // ───────────────────────────────────────────────────────────────────
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans','Segoe UI',sans-serif;background:#f0f2f5;min-height:100vh}
+.nti-nav{background:#1a2332;border-bottom:3px solid #e67e22;position:sticky;top:0;z-index:100}
+.nti-nav-inner{max-width:1200px;margin:0 auto;padding:0 20px;display:flex;align-items:center;justify-content:space-between;height:56px}
+.nti-logo{display:flex;align-items:baseline;gap:10px}
+.nti-logo-mark{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:700;color:#e67e22;letter-spacing:2px}
+.nti-logo-sub{color:#8fa3b1;font-size:12px;letter-spacing:1px;text-transform:uppercase}
+.nti-nav-links{display:flex;gap:4px}
+.nti-nav-btn{padding:6px 16px;border-radius:4px;border:none;cursor:pointer;font-size:13px;font-weight:500;font-family:inherit;color:#8fa3b1;background:transparent;transition:all .15s}
+.nti-nav-btn:hover{color:#fff;background:rgba(255,255,255,.08)}
+.nti-nav-btn.active{background:#e67e22;color:#fff}
+.nti-main{max-width:1200px;margin:0 auto;padding:24px 20px}
+.nti-toast{position:fixed;top:16px;right:16px;z-index:999;padding:10px 18px;border-radius:6px;font-size:13px;font-weight:500;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,.2);animation:slideIn .2s ease}
+@keyframes slideIn{from{transform:translateX(120%)}to{transform:translateX(0)}}
+.nti-toast.ok{background:#27ae60}.nti-toast.warn{background:#e74c3c}.nti-toast.info{background:#2980b9}
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px}
+@media(max-width:700px){.stat-row{grid-template-columns:repeat(2,1fr)}}
+.stat-card{background:#fff;border-radius:8px;padding:16px 20px;border-top:4px solid;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.stat-label{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#95a5a6;margin-bottom:6px}
+.stat-value{font-size:28px;font-weight:700;font-family:'IBM Plex Mono',monospace}
+.nti-card{background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden;margin-bottom:20px}
+.nti-card-header{padding:14px 20px;border-bottom:1px solid #eaedf0;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:14px;color:#2c3e50;flex-wrap:wrap;gap:8px}
+.nti-table{width:100%;border-collapse:collapse;font-size:13px}
+.nti-table thead tr{background:#f8f9fa}
+.nti-table th{padding:9px 16px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#7f8c8d;border-bottom:1px solid #eaedf0;white-space:nowrap}
+.nti-table td{padding:10px 16px;border-bottom:1px solid #f0f2f4;vertical-align:middle}
+.nti-table tr:last-child td{border-bottom:none}
+.nti-table tr:hover td{background:#fafbfc}
+.right{text-align:right}.center{text-align:center}
+.wo-num{font-family:'IBM Plex Mono',monospace;font-weight:600;color:#2980b9}
+.muted{color:#7f8c8d}.fw6{font-weight:600}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;font-family:'IBM Plex Mono',monospace}
+.badge-orange{background:#fef0e6;color:#e67e22}.badge-green{background:#eafaf1;color:#27ae60}
+.action-btn{padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;margin-left:4px;transition:opacity .15s}
+.action-btn:hover{opacity:.8}
+.ab-blue{background:#ebf5fb;color:#2980b9}.ab-green{background:#eafaf1;color:#27ae60}
+.ab-red{background:#fdedec;color:#e74c3c}.ab-orange{background:#fef0e6;color:#e67e22}
+.ab-email{background:#f4ecfb;color:#8e44ad}
+.estatus{font-size:11px;font-weight:600;font-family:'IBM Plex Mono',monospace}
+.es-sending{color:#f39c12}.es-sent{color:#27ae60}.es-err{color:#e74c3c}.es-none{color:#ddd}
+.btn-primary{padding:9px 20px;background:#1a2332;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit;transition:background .15s}
+.btn-primary:hover{background:#e67e22}
+.btn-primary.sm{padding:6px 14px;font-size:12px}
+.btn-ghost{padding:9px 20px;background:transparent;color:#7f8c8d;border:1px solid #d5dce3;border-radius:6px;cursor:pointer;font-size:14px;font-family:inherit}
+.btn-ghost:hover{border-color:#95a5a6;color:#2c3e50}
+.btn-outline{padding:6px 14px;background:transparent;color:#27ae60;border:1px solid #27ae60;border-radius:5px;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit}
+.btn-outline:hover{background:#27ae60;color:#fff}
+.btn-add-line{background:none;border:1.5px dashed #bdc3c7;border-radius:6px;padding:8px 16px;color:#2980b9;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;width:100%}
+.btn-add-line:hover{border-color:#2980b9;background:#ebf5fb}
+.wo-form-header{background:#1a2332;padding:20px 24px;display:flex;align-items:center;justify-content:space-between}
+.wo-company{font-size:18px;font-weight:700;color:#fff;letter-spacing:1px}
+.wo-subtitle{font-size:12px;color:#8fa3b1;margin-top:2px}
+.wo-num-big{font-family:'IBM Plex Mono',monospace;font-size:32px;font-weight:700;color:#e67e22}
+.section-heading{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#95a5a6;margin-bottom:10px;border-bottom:1px solid #eaedf0;padding-bottom:6px}
+.form-row-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-row-4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media(max-width:800px){.form-row-4{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:500px){.form-row-2,.form-row-4{grid-template-columns:1fr}}
+.mb8{margin-bottom:8px}.mb16{margin-bottom:16px}
+.fg{display:flex;flex-direction:column}
+.form-label{font-size:11px;font-weight:600;color:#7f8c8d;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.form-input{padding:7px 10px;border:1.5px solid #e0e5ea;border-radius:5px;font-size:13px;font-family:inherit;color:#2c3e50;transition:border-color .15s;width:100%}
+.form-input:focus{outline:none;border-color:#2980b9}
+.mono{font-family:'IBM Plex Mono',monospace!important}
+.rate-suggest{background:#eafaf1;color:#27ae60;border:none;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
+.line-row{border:1.5px solid #e8ecf0;border-radius:8px;padding:14px 16px;background:#fafbfc;margin-bottom:2px}
+.line-row-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.line-num{font-size:11px;font-weight:600;color:#95a5a6;text-transform:uppercase;letter-spacing:.8px}
+.line-remove{background:none;border:none;color:#e74c3c;font-size:12px;cursor:pointer;font-family:inherit}
+.line-total{text-align:right;font-size:13px;color:#1a2332;margin-top:6px}
+.wo-total-row{display:flex;align-items:baseline;justify-content:flex-end;gap:16px;padding:12px 0;border-top:2px solid #1a2332}
+.wo-total-label{font-size:13px;font-weight:600;color:#7f8c8d;text-transform:uppercase;letter-spacing:.5px}
+.wo-total-amt{font-family:'IBM Plex Mono',monospace;font-size:28px;font-weight:700;color:#1a2332}
+.empty-state{padding:40px;text-align:center;color:#95a5a6;font-size:14px}
+.acct-pill{display:inline-block;padding:2px 7px;background:#1a2332;color:#8fa3b1;border-radius:4px;font-size:10px;font-family:'IBM Plex Mono',monospace}
+.qbo-banner{background:#f0f7ff;border:1px solid #bdd7f0;border-radius:8px;padding:16px 20px;margin-bottom:20px}
+.qbo-banner-title{font-weight:700;color:#1a5276;margin-bottom:10px;font-size:14px}
+.qbo-steps{padding-left:20px;font-size:13px;color:#2c3e50;line-height:1.8}
+.qbo-steps code{background:#dce8f5;padding:1px 5px;border-radius:3px;font-size:12px}
+.loader{display:flex;align-items:center;justify-content:center;height:100vh;color:#8fa3b1;font-family:'IBM Plex Mono',monospace;font-size:14px;background:#0f1923}
+/* Autocomplete */
+.ac-wrap{position:relative}
+.ac-list{position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid #2980b9;border-top:none;border-radius:0 0 6px 6px;list-style:none;padding:4px 0;z-index:400;max-height:220px;overflow-y:auto;box-shadow:0 6px 16px rgba(0,0,0,.12)}
+.ac-item{padding:7px 12px;font-size:13px;cursor:pointer;color:#2c3e50;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ac-item:hover,.ac-item.active{background:#ebf5fb;color:#1a5276}
+.ac-match{color:#e67e22;font-weight:700;background:none}
+/* Service Picker */
+.svc-btn{width:100%;padding:7px 10px;border:1.5px solid #e0e5ea;border-radius:5px;background:#fff;cursor:pointer;font-size:13px;font-family:inherit;color:#2c3e50;display:flex;align-items:center;gap:6px;text-align:left;transition:border-color .15s}
+.svc-btn:hover,.svc-btn:focus{border-color:#2980b9;outline:none}
+.svc-btn-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.svc-dropdown{position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid #2980b9;border-top:none;border-radius:0 0 8px 8px;z-index:400;box-shadow:0 8px 24px rgba(0,0,0,.14);min-width:260px}
+.svc-group-hdr{padding:6px 12px 3px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#95a5a6;background:#f8f9fa;border-top:1px solid #eaedf0}
+.svc-item{padding:7px 12px;font-size:12px;cursor:pointer;color:#2c3e50;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.svc-item:hover,.svc-item.sel{background:#ebf5fb}
+.svc-item.sel .svc-item-name{font-weight:700;color:#1a5276}
+.svc-item-name{flex:1}
+.svc-acct{display:inline-block;padding:1px 5px;background:#1a2332;color:#8fa3b1;border-radius:3px;font-size:10px;font-family:'IBM Plex Mono',monospace;white-space:nowrap}
+/* Toggle switch */
+.toggle{width:48px;height:26px;border-radius:13px;cursor:pointer;position:relative;transition:background .2s;flex-shrink:0}
+.toggle-knob{width:22px;height:22px;border-radius:11px;background:#fff;position:absolute;top:2px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+</style>
+</head>
+<body>
+<div id="root"><div class="loader">Loading NTI Work Orders…</div></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATA CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════════
+const SERVICE_CATALOG = [
+  { group:"Shop Labor",     acct:"7311", name:"Dismount"                  },
+  { group:"Shop Labor",     acct:"7311", name:"Mount"                     },
+  { group:"Shop Labor",     acct:"7311", name:"Dismount / Mount"           },
+  { group:"Shop Labor",     acct:"7311", name:"Remount"                    },
+  { group:"Shop Labor",     acct:"7311", name:"Mount New Tire"             },
+  { group:"Shop Labor",     acct:"7311", name:"Flat Repair"                },
+  { group:"Shop Labor",     acct:"7311", name:"Vulcanized Section Repair"  },
+  { group:"Shop Labor",     acct:"7311", name:"Vulcanized Spot Repair"     },
+  { group:"Shop Labor",     acct:"7311", name:"Rock Cut Sidewall Repair"   },
+  { group:"Shop Labor",     acct:"7311", name:"Sidewall Repair"            },
+  { group:"Shop Labor",     acct:"7311", name:"Tread Repair"               },
+  { group:"Shop Labor",     acct:"7311", name:"Inflate / Check"            },
+  { group:"Shop Labor",     acct:"7311", name:"Foam Fill"                  },
+  { group:"Shop Labor",     acct:"7311", name:"Tire Life Installed"        },
+  { group:"Shop Labor",     acct:"7311", name:"Shop Labor"                 },
+  { group:"Shop Labor",     acct:"7311", name:"Service Call Labor"         },
+  { group:"Tire Sale",      acct:"7352", name:"Mining Tire Sale"           },
+  { group:"Tire Sale",      acct:"7352", name:"OTR Tire Sale"              },
+  { group:"Tire Sale",      acct:"7352", name:"Industrial Tire Sale"       },
+  { group:"Tire Sale",      acct:"7352", name:"Used Tire Sale"             },
+  { group:"Rims & Wheels",  acct:"7315", name:"Rimex Rim & Wheel Defuzer"  },
+  { group:"Rims & Wheels",  acct:"7315", name:"Rim Repair"                 },
+  { group:"Rims & Wheels",  acct:"7315", name:"Wheel Service"              },
+  { group:"Rims & Wheels",  acct:"7315", name:"Rim Sale"                   },
+  { group:"Valve Hardware", acct:"7333", name:"Haltec O-Ring Installed"    },
+  { group:"Valve Hardware", acct:"7333", name:"Haltec Valve Core"          },
+  { group:"Valve Hardware", acct:"7333", name:"Z-Bore Flexible Extension"  },
+  { group:"Valve Hardware", acct:"7333", name:"Metal Z-Bore Extension"     },
+  { group:"Valve Hardware", acct:"7333", name:"Z3-90 90° Swivel Connector" },
+  { group:"Valve Hardware", acct:"7333", name:"Z-10 Core Housing"          },
+  { group:"Valve Hardware", acct:"7333", name:'Z-13 3/4" NPT Screw-In Spud'},
+  { group:"Valve Hardware", acct:"7333", name:'Muffler 3/4" Inlet'         },
+  { group:"Valve Hardware", acct:"7333", name:"Valve Hardware"             },
+  { group:"REMA / Repair",  acct:"7314", name:"REMA Hot Splice"            },
+  { group:"REMA / Repair",  acct:"7314", name:"REMA Tie Gum"               },
+  { group:"REMA / Repair",  acct:"7314", name:"REMA Buffing Wheel"         },
+  { group:"REMA / Repair",  acct:"7314", name:"REMA Cleaning Solvent"      },
+  { group:"REMA / Repair",  acct:"7314", name:"REMA Repair Material"       },
+  { group:"Parts & Misc",   acct:"SPI",  name:"Valve Extension"            },
+  { group:"Parts & Misc",   acct:"SPI",  name:"Inner Dual Valve Extension" },
+  { group:"Parts & Misc",   acct:"SPI",  name:"Tire Repair Material"       },
+  { group:"Parts & Misc",   acct:"SPI",  name:"Misc Parts / Supplies"      },
+  { group:"Subscriptions",  acct:"SUB",  name:"iTrack Subscription"        },
+  { group:"Subscriptions",  acct:"SUB",  name:"iTrack Ghost Truck Sub"     },
+  { group:"Shipping",       acct:"SHP",  name:"Freight / Shipping"         },
+];
+const SVC_GROUPS = [...new Set(SERVICE_CATALOG.map(s=>s.group))];
+const ACCT_LABELS = {"7311":"7311 Shop Labor","7352":"7352 Mining Tires","7315":"7315 Rims/Wheels","7333":"7333 Valve Hardware","7314":"7314 REMA","SPI":"Sales of Product Income","SUB":"Sales","SHP":"Shipping Income"};
+const getSvcMeta = (name) => SERVICE_CATALOG.find(s=>s.name===name) || {group:"",acct:"7311"};
+
+const FULL_PRICING = [
+  {cat:"Truck/Industrial",      section:0,    spot:0,    dm:33 },
+  {cat:"Duplex Truck",          section:191,  spot:75,   dm:40 },
+  {cat:"13/1400 Grader",        section:212,  spot:83,   dm:83 },
+  {cat:"1600 Grader",           section:308,  spot:116,  dm:83 },
+  {cat:"1800 Grader",           section:469,  spot:206,  dm:88 },
+  {cat:"14/1600X24/25",         section:439,  spot:116,  dm:83 },
+  {cat:"1800X25",               section:725,  spot:206,  dm:88 },
+  {cat:"1800X33",               section:884,  spot:206,  dm:112},
+  {cat:"21/2400X35",            section:1356, spot:342,  dm:136},
+  {cat:"24/2700X49",            section:1919, spot:445,  dm:175},
+  {cat:"3000X51",               section:3216, spot:740,  dm:207},
+  {cat:"33/3600X51",            section:3423, spot:788,  dm:242},
+  {cat:"3700R57",               section:4042, spot:930,  dm:317},
+  {cat:"4000R57",               section:4527, spot:1042, dm:354},
+  {cat:"46/90R57",              section:4664, spot:1073, dm:365},
+  {cat:"50/80R57",              section:4895, spot:1126, dm:384},
+  {cat:"53/80R63",              section:5229, spot:1718, dm:433},
+  {cat:"15.5X25",               section:349,  spot:83,   dm:83 },
+  {cat:"17.5X25",               section:439,  spot:116,  dm:83 },
+  {cat:"20.5X25",               section:659,  spot:209,  dm:83 },
+  {cat:"23.5X25",               section:835,  spot:251,  dm:118},
+  {cat:"26.5X25",               section:935,  spot:251,  dm:126},
+  {cat:"29.5X25/29",            section:1168, spot:500,  dm:136},
+  {cat:"35/65X33, 33.25X35",    section:1962, spot:785,  dm:162},
+  {cat:"37.25X35",              section:2159, spot:863,  dm:175},
+  {cat:"37.5X39",               section:2519, spot:855,  dm:175},
+  {cat:"45/65X45 (39)",         section:3712, spot:1448, dm:289},
+  {cat:"50/65X51",              section:4346, spot:1541, dm:360},
+  {cat:"53.5/85X57, 55/80R57",  section:4979, spot:1635, dm:428},
+  {cat:"58/85X57, 60/80R57",    section:5229, spot:1718, dm:449},
+  {cat:"Forestry",              section:500,  spot:210,  dm:156},
+  {cat:"Farm",                  section:234,  spot:86,   dm:156},
+];
+
+const TIRE_SIZES = [
+  {size:"53/80R63",         pricingCat:"53/80R63"},
+  {size:"58/85X57",         pricingCat:"58/85X57, 60/80R57"},
+  {size:"60/80R57",         pricingCat:"58/85X57, 60/80R57"},
+  {size:"53.5/85X57",       pricingCat:"53.5/85X57, 55/80R57"},
+  {size:"55/80R57",         pricingCat:"53.5/85X57, 55/80R57"},
+  {size:"50/80R57",         pricingCat:"50/80R57"},
+  {size:"46/90R57",         pricingCat:"46/90R57"},
+  {size:"40.00R57",         pricingCat:"4000R57"},
+  {size:"4000R57",          pricingCat:"4000R57"},
+  {size:"37.00R57",         pricingCat:"3700R57"},
+  {size:"3700R57",          pricingCat:"3700R57"},
+  {size:"33.00R51",         pricingCat:"33/3600X51"},
+  {size:"33/3600X51",       pricingCat:"33/3600X51"},
+  {size:"30.00X51",         pricingCat:"3000X51"},
+  {size:"3000X51",          pricingCat:"3000X51"},
+  {size:"50/65X51",         pricingCat:"50/65X51"},
+  {size:"45/65X45",         pricingCat:"45/65X45 (39)"},
+  {size:"45/65R45",         pricingCat:"45/65X45 (39)"},
+  {size:"27.00X49",         pricingCat:"24/2700X49"},
+  {size:"24/2700X49",       pricingCat:"24/2700X49"},
+  {size:"37.5X39",          pricingCat:"37.5X39"},
+  {size:"37.25X35",         pricingCat:"37.25X35"},
+  {size:"35/65X33",         pricingCat:"35/65X33, 33.25X35"},
+  {size:"33.25X35",         pricingCat:"35/65X33, 33.25X35"},
+  {size:"24.00X35",         pricingCat:"21/2400X35"},
+  {size:"21/2400X35",       pricingCat:"21/2400X35"},
+  {size:"18.00X33",         pricingCat:"1800X33"},
+  {size:"1800X33",          pricingCat:"1800X33"},
+  {size:"29.5X25",          pricingCat:"29.5X25/29"},
+  {size:"29.5R25",          pricingCat:"29.5X25/29"},
+  {size:"29.5R29",          pricingCat:"29.5X25/29"},
+  {size:"26.5X25",          pricingCat:"26.5X25"},
+  {size:"26.5R25",          pricingCat:"26.5X25"},
+  {size:"23.5X25",          pricingCat:"23.5X25"},
+  {size:"23.5R25",          pricingCat:"23.5X25"},
+  {size:"20.5X25",          pricingCat:"20.5X25"},
+  {size:"20.5R25",          pricingCat:"20.5X25"},
+  {size:"18.00X25",         pricingCat:"1800X25"},
+  {size:"1800X25",          pricingCat:"1800X25"},
+  {size:"17.5X25",          pricingCat:"17.5X25"},
+  {size:"17.5R25",          pricingCat:"17.5X25"},
+  {size:"15.5X25",          pricingCat:"15.5X25"},
+  {size:"15.5R25",          pricingCat:"15.5X25"},
+  {size:"18.00X24",         pricingCat:"1800 Grader"},
+  {size:"1800X24",          pricingCat:"1800 Grader"},
+  {size:"16.00X24",         pricingCat:"1600 Grader"},
+  {size:"1600X24",          pricingCat:"1600 Grader"},
+  {size:"16.00X25",         pricingCat:"14/1600X24/25"},
+  {size:"14.00X25",         pricingCat:"14/1600X24/25"},
+  {size:"14.00X24",         pricingCat:"14/1600X24/25"},
+  {size:"13.00X24",         pricingCat:"13/1400 Grader"},
+];
+const TIRE_SIZE_NAMES = TIRE_SIZES.map(t=>t.size);
+
+const MAKES = ["Bridgestone","Michelin","Goodyear","Titan","Alliance","Firestone",
+  "Continental","BKT","Galaxy","Trelleborg","Maxam","Primex","Magna","Yokohama","Double Coin"];
+
+const POSITIONS = ["LF","RF","LRO","LRI","RRO","RRI","LRF","LRR","RRF","RRR",
+  "LF1","RF1","LMO","LMI","RMO","RMI","Left Front","Right Front","Left Rear","Right Rear",
+  "Front","Rear","1","2","3","4","5","6","7","8","9","10","11","12","Spare"];
+
+const QBO_CUSTOMERS = [
+  "41 AUTO SALES","A&L IRON","A. LINDBERG & SONS","ALTA EQUIPMENT COMPANY",
+  "APPLIED INDUSTRIAL TECH","ASSOCIATED CONSTRUCTORS","AUTO VALUE OF ISHPEMING",
+  "BACCO CONSTRUCTION","BAUER BUILT INC","CALUMET MACHINE","CARLSON LOY & CO.",
+  "CARMEUSE LIME & STONE - CEDARVILLE","CARMEUSE LIME & STONE-P.I./GULLIVER",
+  "CARMEUSE LIME AND STONE-D.I.","CASH CUSTOMER-","CHAMPION CHARTER SALES",
+  "CHAMPION FIRE DEPT.","CITY OF ISHPEMING - 1","CITY OF MUNISING",
+  "CLEVELAND-CLIFFS","COVIA","CSI SANDS (N.E.) Ltd.","Custom Construction",
+  "DYNO NOBEL","EAGLE MINE LLC","ENVOY AIR, INC.","FABICK","FERGUSON ENTERPRISES",
+  "GCR TIRE","HOLLI FOREST PRODUCTS INC","ISHPEMING AREA WASTE WATER",
+  "JACK'S BUILDERS","JASPER ENGINEERING","JUBILEE FOODS",
+  "KLEIMAN PUMP & WELL DRILLING INC","LS&I","MAINVILLE ENTERPRIZES INC - 1",
+  "MARQUETTE COUNTY ROAD CO.","MARQUETTE COUNTY SOLID WASTE",
+  "MILLER BRADFORD & RISBERG INC.","MOCORP, INC","MOTION INDUSTRIES, INC.",
+  "NIEMI EXCAVATING","NORTHWOODS MFG","OBERSTAR INC.","PENINSULA MEDICAL CTR",
+  "POTLATCH CORPORATION","PRIME SUPPLY COMPANY","REPUBLIC TOWNSHIP",
+  "RICHARDSON EXCAVATING","RIMEX","RL BALCONI COMPANY",
+  "ROAD MACHINERY & SUPPLIES","ROBBINS INC","TILDEN MINING COMPANY",
+  "TRUCK AWAY - 1","TUFCO","U.P. FABRICATING CO., INC","VAST MANAGEMENT INTERNATIONAL",
+  "WILLIAMS PARTS & SUPPLY","iTrack (North America)Inc",
+];
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+const $f  = n => `$${Number(n||0).toFixed(2)}`;
+const tod = () => new Date().toISOString().split("T")[0];
+const uid = () => `${Date.now()}${Math.floor(Math.random()*9999)}`;
+const lTotal = l => (l.qty||0)*(l.rate||0);
+const wTotal = wo => (wo.lines||[]).reduce((s,l)=>s+lTotal(l),0);
+
+function tireToCat(size){
+  const m=TIRE_SIZES.find(t=>t.size.toLowerCase()===size.toLowerCase());
+  return m?m.pricingCat:"";
+}
+function bookRate(cat,svc){
+  const p=FULL_PRICING.find(r=>r.cat===cat);
+  if(!p)return 0;
+  const s=svc||"";
+  if(["Dismount","Mount","Remount","Service Call"].some(k=>s.startsWith(k)))return p.dm;
+  if(s.includes("Section"))return p.section;
+  if(s.includes("Spot"))return p.spot;
+  return p.dm;
+}
+
+const newLine = () => ({
+  id:uid(), unitNo:"", position:"", tireSize:"", make:"", serialNo:"",
+  brNo:"", rimNo:"", serviceType:"Dismount / Mount", pricingCat:"", qty:1, rate:0, notes:""
+});
+
+// ─── SUPABASE OPERATIONS ──────────────────────────────────────────────────────
+async function fetchAllWOs() {
+  const {data,error} = await sb.from("work_orders").select("*").order("id",{ascending:false});
+  if(error) throw error;
+  return data || [];
+}
+async function upsertWO(wo) {
+  const row = {
+    id: wo.id, date: wo.date, customer: wo.customer,
+    lines: wo.lines, status: wo.status,
+    invoice_no: wo.invoiceNo||"", notes: wo.notes||"",
+    created_at: wo.createdAt||Date.now(), email_sent: wo.emailSent||false,
+  };
+  const {error} = await sb.from("work_orders").upsert(row);
+  if(error) throw error;
+}
+async function deleteWOdb(id) {
+  const {error} = await sb.from("work_orders").delete().eq("id",id);
+  if(error) throw error;
+}
+async function getNextId() {
+  const {data} = await sb.from("work_orders").select("id").order("id",{ascending:false}).limit(1);
+  if(data&&data.length>0){
+    const last = parseInt(data[0].id,10);
+    return isNaN(last)?STARTING_WO:last+1;
+  }
+  return STARTING_WO;
+}
+
+// DB row → app object
+function rowToWO(r){
+  return {
+    id: r.id, date: r.date, customer: r.customer,
+    lines: r.lines||[], status: r.status||"open",
+    invoiceNo: r.invoice_no||"", notes: r.notes||"",
+    createdAt: r.created_at||Date.now(), emailSent: r.email_sent||false,
+  };
+}
+
+// ─── QBO CSV ──────────────────────────────────────────────────────────────────
+function buildCSV(wos){
+  const hdr=["*InvoiceNo","*Customer","*InvoiceDate","*DueDate","Terms",
+    "*Item(Product/Service)","ItemDescription","*ItemQuantity","*ItemRate","ItemAmount","*Tax"];
+  const rows=[hdr];
+  wos.forEach(wo=>{
+    const inv=wo.invoiceNo||`NTI-${wo.id}`;
+    const due=new Date(wo.date); due.setDate(due.getDate()+30);
+    const dueStr=due.toISOString().split("T")[0];
+    (wo.lines||[]).forEach((l,i)=>{
+      const desc=[
+        l.unitNo&&`Unit:${l.unitNo}`,l.position&&`Pos:${l.position}`,
+        l.tireSize,l.make,l.serialNo&&`S/N:${l.serialNo}`,
+        l.brNo&&`Br#${l.brNo}`,l.rimNo&&`Rim#${l.rimNo}`,l.notes,
+      ].filter(Boolean).join(" | ");
+      rows.push([i===0?inv:"",i===0?wo.customer:"",i===0?wo.date:"",
+        i===0?dueStr:"",i===0?"Net 30":"",
+        l.serviceType,desc,l.qty,Number(l.rate).toFixed(2),lTotal(l).toFixed(2),"N"]);
+    });
+  });
+  return rows.map(r=>r.map(c=>`"${c}"`).join(",")).join("\n");
+}
+function downloadCSV(wos){
+  const a=Object.assign(document.createElement("a"),{
+    href:URL.createObjectURL(new Blob([buildCSV(wos)],{type:"text/csv"})),
+    download:`NTI_QBO_${tod()}.csv`
+  });
+  a.click();
+}
+
+// ─── EMAIL (Gmail MCP via Anthropic API) ─────────────────────────────────────
+function buildEmailHTML(wo){
+  const total=wTotal(wo);
+  const rows=(wo.lines||[]).map((l,i)=>`
+    <tr style="background:${i%2===0?"#f9fafb":"#fff"}">
+      <td style="padding:7px 9px;font-size:12px">${l.unitNo||"—"}</td>
+      <td style="padding:7px 9px;font-size:12px">${l.position||"—"}</td>
+      <td style="padding:7px 9px;font-family:monospace;font-size:12px;font-weight:600;color:#1a5276">${l.tireSize||"—"}</td>
+      <td style="padding:7px 9px;font-size:12px">${l.make||"—"}</td>
+      <td style="padding:7px 9px;font-family:monospace;font-size:11px">${l.serialNo||"—"}</td>
+      <td style="padding:7px 9px;font-family:monospace;font-size:11px">${l.brNo||"—"}</td>
+      <td style="padding:7px 9px;font-family:monospace;font-size:11px">${l.rimNo||"—"}</td>
+      <td style="padding:7px 9px;font-size:12px;font-weight:600;color:#e67e22">${l.serviceType}</td>
+      <td style="padding:7px 9px;text-align:center;font-size:12px">${l.qty}</td>
+      <td style="padding:7px 9px;text-align:right;font-size:12px">${$f(l.rate)}</td>
+      <td style="padding:7px 9px;text-align:right;font-size:13px;font-weight:700">${$f(lTotal(l))}</td>
+    </tr>`).join("");
+  return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f0f2f5;font-family:Segoe UI,Arial,sans-serif">
+<div style="max-width:820px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)">
+  <div style="background:#1a2332;padding:20px 28px;display:flex;justify-content:space-between;align-items:center">
+    <div><div style="color:#fff;font-size:20px;font-weight:700;letter-spacing:1px">NORTHERN TIRE, INC.</div>
+    <div style="color:#8fa3b1;font-size:12px;margin-top:2px;text-transform:uppercase;letter-spacing:1px">Work Order</div></div>
+    <div style="color:#e67e22;font-size:32px;font-weight:700;font-family:monospace">#${wo.id}</div>
+  </div>
+  <div style="padding:16px 28px;border-bottom:1px solid #eee;display:flex;gap:40px">
+    <div><div style="font-size:11px;color:#999;text-transform:uppercase">Customer</div><div style="font-size:16px;font-weight:700;color:#1a2332;margin-top:3px">${wo.customer}</div></div>
+    <div><div style="font-size:11px;color:#999;text-transform:uppercase">Date</div><div style="font-size:16px;font-weight:600;color:#1a2332;margin-top:3px">${wo.date}</div></div>
+    <div><div style="font-size:11px;color:#999;text-transform:uppercase">WO Total</div><div style="font-size:16px;font-weight:700;color:#1a2332;margin-top:3px">${$f(total)}</div></div>
+  </div>
+  <div style="padding:20px 28px;overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;min-width:600px"><thead><tr style="background:#1a2332">
+      <th style="padding:7px 9px;color:#8fa3b1;font-size:10px;text-align:left">Unit#</th>
+      <th style="padding:7px 9px;color:#8fa3b1;font-size:10px;text-align:left">Pos</th>
+      <th style="padding:7px 9px;color:#8fa3b1;font-size:10px;text-align:left">Tire Size</th>
+      <th style="padding:7px 9px;color:#8fa3b1;font-size:10px;text-align:left">Make</th>
+      <th style="padding:7px 9px;color:#8fa3b1;font-size:10px;text-align:left">Serial#</th>
+      <th style="padding:7px 9px;color:#8fa3b1;font-size:10px;text-align:left">Br#</th>
+      <th style="padding:7px 9px;color:#8fa3b1;font-size:10px;text-align:left">Rim#</th>
+      <th style="padding:7px 9px;color:#8fa3b1;font-size:10px;text-align:left">Service</th>
+      <th style="padding:7px 9px;color:#8fa3b1;font-size:10px;text-align:center">Qty</th>
+      <th style="padding:7px 9px;color:#8fa3b1;font-size:10px;text-align:right">Rate</th>
+      <th style="padding:7px 9px;color:#8fa3b1;font-size:10px;text-align:right">Total</th>
+    </tr></thead><tbody>${rows}</tbody></table>
+  </div>
+  ${wo.notes?`<div style="padding:0 28px 14px;font-size:13px;color:#555"><strong>Notes:</strong> ${wo.notes}</div>`:""}
+  <div style="padding:16px 28px;border-top:2px solid #1a2332;display:flex;justify-content:flex-end;align-items:center;gap:16px">
+    <span style="font-size:12px;text-transform:uppercase;color:#999;font-weight:600">Work Order Total</span>
+    <span style="font-size:28px;font-weight:700;font-family:monospace;color:#1a2332">${$f(total)}</span>
+  </div>
+  <div style="padding:10px 28px;background:#f8f9fa;font-size:11px;color:#999;text-align:center">Northern Tire, Inc. · northerntireinc@gmail.com · Customer prior approval required for repairs.</div>
+</div></body></html>`;
+}
+
+async function sendEmail(wo, recipients, ccEmail){
+  const toStr=recipients.filter(Boolean).join(", ");
+  if(!toStr)throw new Error("No recipient email configured in Settings.");
+  const subject=`NTI Work Order #${wo.id} — ${wo.customer} — ${wo.date} — ${$f(wTotal(wo))}`;
+  const prompt=`Send an email via Gmail:\nTo: ${toStr}${ccEmail?`\nCC: ${ccEmail}`:""}\nSubject: ${subject}\nHTML Body: ${buildEmailHTML(wo)}\n\nAppend at end:\n---\nQUICKBOOKS CSV:\n${buildCSV([wo])}\n---\nSend now.`;
+  const resp=await fetch("https://api.anthropic.com/v1/messages",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
+      mcp_servers:[{type:"url",url:"https://gmail.mcp.claude.com/mcp",name:"gmail"}],
+      messages:[{role:"user",content:prompt}]}),
+  });
+  if(!resp.ok){const e=await resp.json().catch(()=>({}));throw new Error(e?.error?.message||`HTTP ${resp.status}`);}
+  return resp.json();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTOCOMPLETE
+// ═══════════════════════════════════════════════════════════════════════════════
+function AcInput({value,onChange,options,placeholder,monoFont}){
+  const [open,setOpen]=useState(false);
+  const [cursor,setCursor]=useState(-1);
+  const ref=useRef(null); const listRef=useRef(null); const timer=useRef(null);
+  const filtered=value.trim()===""?options.slice(0,14):options.filter(o=>o.toLowerCase().includes(value.toLowerCase())).slice(0,14);
+  const pick=v=>{onChange(v);setOpen(false);setCursor(-1);};
+  const handleKey=e=>{
+    if(!open){if(e.key==="ArrowDown"||e.key==="Enter")setOpen(true);return;}
+    if(e.key==="ArrowDown"){e.preventDefault();setCursor(c=>Math.min(c+1,filtered.length-1));}
+    if(e.key==="ArrowUp"){e.preventDefault();setCursor(c=>Math.max(c-1,-1));}
+    if(e.key==="Enter"){e.preventDefault();if(cursor>=0&&filtered[cursor])pick(filtered[cursor]);else setOpen(false);}
+    if(e.key==="Escape"){setOpen(false);setCursor(-1);}
+    if(e.key==="Tab")setOpen(false);
+  };
+  useEffect(()=>{if(cursor>=0&&listRef.current)listRef.current.children[cursor]?.scrollIntoView({block:"nearest"});},[cursor]);
+  const highlight=(opt)=>{
+    const idx=opt.toLowerCase().indexOf(value.toLowerCase());
+    if(!value||idx<0)return opt;
+    return <>{opt.slice(0,idx)}<strong className="ac-match">{opt.slice(idx,idx+value.length)}</strong>{opt.slice(idx+value.length)}</>;
+  };
+  return (
+    <div className="ac-wrap">
+      <input ref={ref} className={`form-input${monoFont?" mono":""}`}
+        value={value} placeholder={placeholder} autoComplete="off"
+        onChange={e=>{onChange(e.target.value);setOpen(true);setCursor(-1);}}
+        onFocus={()=>setOpen(true)}
+        onBlur={()=>{timer.current=setTimeout(()=>setOpen(false),160);}}
+        onKeyDown={handleKey}/>
+      {open&&filtered.length>0&&(
+        <ul ref={listRef} className="ac-list"
+          onMouseDown={e=>{clearTimeout(timer.current);e.preventDefault();}}>
+          {filtered.map((opt,i)=>(
+            <li key={opt} className={`ac-item${i===cursor?" active":""}`} onClick={()=>pick(opt)}>
+              {highlight(opt)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ─── SERVICE PICKER ───────────────────────────────────────────────────────────
+function SvcPicker({value,onChange}){
+  const [open,setOpen]=useState(false);
+  const [search,setSearch]=useState("");
+  const ref=useRef(null);
+  const meta=getSvcMeta(value);
+  useEffect(()=>{
+    const fn=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};
+    document.addEventListener("mousedown",fn);
+    return()=>document.removeEventListener("mousedown",fn);
+  },[]);
+  const filtered=search.trim()===""?SERVICE_CATALOG:SERVICE_CATALOG.filter(s=>s.name.toLowerCase().includes(search.toLowerCase())||s.group.toLowerCase().includes(search.toLowerCase()));
+  const groups=SVC_GROUPS.filter(g=>filtered.some(s=>s.group===g));
+  return (
+    <div ref={ref} style={{position:"relative"}}>
+      <button type="button" className="svc-btn" onClick={()=>{setOpen(!open);setSearch("");}}>
+        <span className="svc-btn-name">{value||"— Select Service —"}</span>
+        {meta.acct&&<span className="svc-acct">{meta.acct}</span>}
+        <span style={{color:"#aaa",fontSize:10,marginLeft:"auto"}}>▼</span>
+      </button>
+      {open&&(
+        <div className="svc-dropdown">
+          <div style={{padding:"8px 10px",borderBottom:"1px solid #eaedf0"}}>
+            <input className="form-input" style={{fontSize:12,padding:"5px 8px"}}
+              placeholder="Search services…" autoFocus value={search}
+              onChange={e=>setSearch(e.target.value)}/>
+          </div>
+          <div style={{maxHeight:300,overflowY:"auto"}}>
+            {groups.map(g=>(
+              <div key={g}>
+                <div className="svc-group-hdr">{g}</div>
+                {filtered.filter(s=>s.group===g).map(s=>(
+                  <div key={s.name} className={`svc-item${s.name===value?" sel":""}`}
+                    onClick={()=>{onChange(s.name);setOpen(false);}}>
+                    <span className="svc-item-name">{s.name}</span>
+                    <span className="svc-acct">{s.acct}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROOT APP
+// ═══════════════════════════════════════════════════════════════════════════════
+function App(){
+  const [wos,setWos]=useState([]);
+  const [settings,setSettings]=useState({autoEmail:true,recipients:["northerntireinc@gmail.com"],ccEmail:""});
+  const [view,setView]=useState("dash");
+  const [editWO,setEditWO]=useState(null);
+  const [toast,setToast]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [dbError,setDbError]=useState(null);
+  const [sending,setSending]=useState({});
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const data=await fetchAllWOs();
+        setWos(data.map(rowToWO));
+        const saved=localStorage.getItem("nti-settings");
+        if(saved)setSettings(JSON.parse(saved));
+      }catch(e){
+        setDbError(e.message||"Supabase connection failed. Check your credentials in the HTML file.");
+      }
+      setLoading(false);
+    })();
+  },[]);
+
+  const saveSettings=s=>{setSettings(s);localStorage.setItem("nti-settings",JSON.stringify(s));};
+
+  const toast_=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),4000);};
+
+  const triggerEmail=useCallback(async(wo)=>{
+    setSending(s=>({...s,[wo.id]:"sending"}));
+    try{
+      await sendEmail(wo,settings.recipients,settings.ccEmail);
+      setSending(s=>({...s,[wo.id]:"sent"}));
+      toast_(`📧 WO #${wo.id} emailed`);
+      const updated={...wo,emailSent:true};
+      await upsertWO(updated);
+      setWos(prev=>prev.map(w=>w.id===wo.id?updated:w));
+    }catch(e){
+      setSending(s=>({...s,[wo.id]:"error"}));
+      toast_(`Email error: ${e.message}`,"warn");
+    }
+  },[settings]);
+
+  const saveWO=useCallback(async(wo)=>{
+    try{
+      await upsertWO(wo);
+      const isNew=!wos.some(w=>w.id===wo.id);
+      setWos(prev=>isNew?[wo,...prev]:prev.map(w=>w.id===wo.id?wo:w));
+      toast_(`✓ WO #${wo.id} saved`);
+      setView("dash");setEditWO(null);
+      if(settings.autoEmail)setTimeout(()=>triggerEmail(wo),600);
+    }catch(e){toast_(`Save failed: ${e.message}`,"warn");}
+  },[wos,settings,triggerEmail]);
+
+  const deleteWO=useCallback(async(id)=>{
+    if(!confirm(`Delete Work Order #${id}?`))return;
+    try{
+      await deleteWOdb(id);
+      setWos(prev=>prev.filter(w=>w.id!==id));
+      toast_("Deleted","warn");
+    }catch(e){toast_(`Delete failed: ${e.message}`,"warn");}
+  },[]);
+
+  const markInvoiced=useCallback(async(wo,invNo)=>{
+    const updated={...wo,status:"invoiced",invoiceNo:invNo};
+    try{
+      await upsertWO(updated);
+      setWos(prev=>prev.map(w=>w.id===wo.id?updated:w));
+      toast_(`WO #${wo.id} → Invoice ${invNo}`);
+    }catch(e){toast_(`Update failed: ${e.message}`,"warn");}
+  },[]);
+
+  const openNew=async()=>{
+    const nextId=await getNextId();
+    const wo={id:String(nextId),date:tod(),customer:"CLEVELAND-CLIFFS",lines:[newLine()],status:"open",invoiceNo:"",notes:"",createdAt:Date.now(),emailSent:false};
+    setEditWO(wo);setView("edit");
+  };
+  const openEdit=(wo)=>{setEditWO(JSON.parse(JSON.stringify(wo)));setView("edit");};
+
+  if(loading)return <div className="loader">Loading NTI Work Orders…</div>;
+  if(dbError)return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0f1923",padding:20}}>
+      <div style={{background:"#1a2332",borderRadius:8,padding:32,maxWidth:500,color:"#fff"}}>
+        <div style={{color:"#e74c3c",fontSize:18,fontWeight:700,marginBottom:12}}>⚠ Supabase Connection Error</div>
+        <div style={{color:"#8fa3b1",fontSize:13,lineHeight:1.7,marginBottom:16}}>{dbError}</div>
+        <div style={{background:"#0f1923",borderRadius:6,padding:16,fontSize:12,color:"#8fa3b1",fontFamily:"monospace",lineHeight:2}}>
+          1. Open index.html in a text editor<br/>
+          2. Set SUPABASE_URL to your project URL<br/>
+          3. Set SUPABASE_KEY to your anon/public key<br/>
+          4. Run the SQL to create the work_orders table
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <nav className="nti-nav">
+        <div className="nti-nav-inner">
+          <div className="nti-logo">
+            <span className="nti-logo-mark">NTI</span>
+            <span className="nti-logo-sub">Work Orders</span>
+          </div>
+          <div className="nti-nav-links">
+            {[["dash","Dashboard"],["new","＋ New WO"],["invoices","Invoices"],["settings","⚙ Settings"]].map(([v,l])=>(
+              <button key={v} className={`nti-nav-btn${(view===v||(v==="new"&&view==="edit"))?" active":""}`}
+                onClick={()=>v==="new"?openNew():setView(v)}>{l}</button>
+            ))}
+          </div>
+        </div>
+      </nav>
+
+      {toast&&<div className={`nti-toast ${toast.type}`}>{toast.msg}</div>}
+
+      <div className="nti-main">
+        {view==="dash"     && <Dashboard wos={wos} sending={sending} onEdit={openEdit} onDelete={deleteWO} onExport={downloadCSV} onResend={triggerEmail} autoEmail={settings.autoEmail}/>}
+        {view==="edit"     && editWO && <WOForm wo={editWO} onSave={saveWO} onCancel={()=>{setView("dash");setEditWO(null);}} autoEmail={settings.autoEmail}/>}
+        {view==="invoices" && <InvoicesView wos={wos} onExport={downloadCSV} onMarkInvoiced={markInvoiced} onEdit={openEdit}/>}
+        {view==="settings" && <SettingsView settings={settings} onSave={saveSettings}/>}
+      </div>
+    </div>
+  );
+}
+
+// ─── DASHBOARD ────────────────────────────────────────────────────────────────
+function Dashboard({wos,sending,onEdit,onDelete,onExport,onResend,autoEmail}){
+  const open=wos.filter(w=>w.status==="open");
+  const inv=wos.filter(w=>w.status==="invoiced");
+  const sorted=[...wos].sort((a,b)=>Number(b.id)-Number(a.id));
+  return (
+    <div>
+      <div className="stat-row">
+        <StatCard label="Open WOs"     value={open.length}  accent="#e67e22"/>
+        <StatCard label="Invoiced"     value={inv.length}   accent="#27ae60"/>
+        <StatCard label="Open Balance" value={$f(open.reduce((s,w)=>s+wTotal(w),0))} accent="#2980b9"/>
+        <StatCard label="Auto-Email"   value={autoEmail?"ON":"OFF"} accent={autoEmail?"#27ae60":"#95a5a6"}/>
+      </div>
+      <div className="nti-card">
+        <div className="nti-card-header">
+          <span>Work Orders</span>
+          {open.length>0&&<button className="btn-outline" onClick={()=>onExport(open)}>Export Open → QBO</button>}
+        </div>
+        {sorted.length===0?<div className="empty-state">No work orders yet. Click <strong>＋ New WO</strong>.</div>:(
+          <div style={{overflowX:"auto"}}>
+            <table className="nti-table">
+              <thead><tr>
+                <th>WO #</th><th>Date</th><th>Customer</th>
+                <th className="right">Amount</th><th className="center">Status</th>
+                <th className="center">Email</th><th className="right">Actions</th>
+              </tr></thead>
+              <tbody>{sorted.map(wo=>{
+                const st=sending[wo.id];
+                return (
+                  <tr key={wo.id}>
+                    <td><span className="wo-num">#{wo.id}</span></td>
+                    <td className="muted">{wo.date}</td>
+                    <td className="fw6">{wo.customer}</td>
+                    <td className="right fw6">{$f(wTotal(wo))}</td>
+                    <td className="center">{wo.status==="open"?<span className="badge badge-orange">Open</span>:<span className="badge badge-green">#{wo.invoiceNo}</span>}</td>
+                    <td className="center">
+                      {st==="sending"&&<span className="estatus es-sending">⏳</span>}
+                      {st==="sent"&&<span className="estatus es-sent">✓</span>}
+                      {st==="error"&&<span className="estatus es-err">✗</span>}
+                      {!st&&wo.emailSent&&<span className="estatus es-sent">✓</span>}
+                      {!st&&!wo.emailSent&&<span className="estatus es-none">—</span>}
+                    </td>
+                    <td className="right" style={{whiteSpace:"nowrap"}}>
+                      <button className="action-btn ab-blue"  onClick={()=>onEdit(wo)}>Edit</button>
+                      <button className="action-btn ab-green" onClick={()=>onExport([wo])}>QBO</button>
+                      <button className="action-btn ab-email" onClick={()=>onResend(wo)}>📧</button>
+                      <button className="action-btn ab-red"   onClick={()=>onDelete(wo.id)}>✕</button>
+                    </td>
+                  </tr>
+                );
+              })}</tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+function StatCard({label,value,accent}){return(<div className="stat-card" style={{borderTopColor:accent}}><div className="stat-label">{label}</div><div className="stat-value" style={{color:accent}}>{value}</div></div>);}
+
+// ─── WORK ORDER FORM ──────────────────────────────────────────────────────────
+function WOForm({wo,onSave,onCancel,autoEmail}){
+  const [form,setForm]=useState(wo);
+  const setF=(k,v)=>setForm(f=>({...f,[k]:v}));
+
+  const updateLine=(id,updates)=>setForm(f=>({
+    ...f,
+    lines:f.lines.map(l=>{
+      if(l.id!==id)return l;
+      const u={...l,...updates};
+      if(updates.tireSize!==undefined){const cat=tireToCat(updates.tireSize);if(cat)u.pricingCat=cat;}
+      if(updates.pricingCat!==undefined||updates.serviceType!==undefined){
+        const cat=updates.pricingCat??u.pricingCat;
+        const svc=updates.serviceType??u.serviceType;
+        const br=bookRate(cat,svc);
+        if(br>0)u.rate=br;
+      }
+      return u;
+    })
+  }));
+
+  const addLine=()=>setForm(f=>({...f,lines:[...f.lines,newLine()]}));
+  const removeLine=id=>setForm(f=>({...f,lines:f.lines.filter(l=>l.id!==id)}));
+  const total=(form.lines||[]).reduce((s,l)=>s+lTotal(l),0);
+
+  return (
+    <div>
+      <div className="nti-card">
+        <div className="wo-form-header">
+          <div><div className="wo-company">NORTHERN TIRE, INC.</div><div className="wo-subtitle">Work Order</div></div>
+          <div className="wo-num-big">#{form.id}</div>
+        </div>
+        <div style={{padding:"20px 24px"}}>
+          <div className="form-row-2 mb16">
+            <div className="fg">
+              <label className="form-label">Customer</label>
+              <AcInput value={form.customer} onChange={v=>setF("customer",v)} options={QBO_CUSTOMERS} placeholder="Search customers…"/>
+            </div>
+            <div className="fg">
+              <label className="form-label">Date</label>
+              <input type="date" className="form-input" value={form.date} onChange={e=>setF("date",e.target.value)}/>
+            </div>
+          </div>
+
+          <div className="section-heading">Service Lines</div>
+          <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:12}}>
+            {form.lines.map((line,idx)=>(
+              <LineRow key={line.id} line={line} idx={idx}
+                canRemove={form.lines.length>1}
+                onChange={updateLine} onRemove={removeLine}/>
+            ))}
+          </div>
+          <button className="btn-add-line" onClick={addLine}>＋ Add Line</button>
+
+          <div className="fg mb16" style={{marginTop:16}}>
+            <label className="form-label">Notes / Special Instructions</label>
+            <textarea className="form-input" rows={2} value={form.notes}
+              onChange={e=>setF("notes",e.target.value)}
+              placeholder="e.g. Remount on different rim, junk tire, prior approval…"/>
+          </div>
+
+          <div className="wo-total-row">
+            <span className="wo-total-label">Work Order Total</span>
+            <span className="wo-total-amt">{$f(total)}</span>
+          </div>
+
+          {autoEmail&&<div style={{marginTop:10,padding:"8px 12px",background:"#eafaf1",borderRadius:6,fontSize:12,color:"#1e8449",display:"flex",gap:6}}>📧 Will auto-email when saved</div>}
+
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}>
+            <button className="btn-ghost" onClick={onCancel}>Cancel</button>
+            <button className="btn-primary" onClick={()=>onSave(form)}>Save &amp; Send WO</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── LINE ROW ─────────────────────────────────────────────────────────────────
+function LineRow({line,idx,canRemove,onChange,onRemove}){
+  const br=bookRate(line.pricingCat,line.serviceType);
+  const showSuggest=br>0&&line.rate!==br;
+  const meta=getSvcMeta(line.serviceType);
+  return (
+    <div className="line-row">
+      <div className="line-row-hdr">
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span className="line-num">Line {idx+1}</span>
+          {meta.acct&&<span className="acct-pill">{ACCT_LABELS[meta.acct]||meta.acct}</span>}
+        </div>
+        {canRemove&&<button className="line-remove" onClick={()=>onRemove(line.id)}>Remove</button>}
+      </div>
+
+      {/* Row 1: Unit # | Position | Tire Size | Make */}
+      <div className="form-row-4 mb8">
+        <div className="fg"><label className="form-label">Unit #</label>
+          <input className="form-input mono" value={line.unitNo} onChange={e=>onChange(line.id,{unitNo:e.target.value})} placeholder="785-01"/>
+        </div>
+        <div className="fg"><label className="form-label">Position</label>
+          <AcInput value={line.position} onChange={v=>onChange(line.id,{position:v})} options={POSITIONS} placeholder="LF, RRO…"/>
+        </div>
+        <div className="fg"><label className="form-label">Tire Size</label>
+          <AcInput value={line.tireSize} onChange={v=>onChange(line.id,{tireSize:v})} options={TIRE_SIZE_NAMES} placeholder="33.00R51…" monoFont/>
+        </div>
+        <div className="fg"><label className="form-label">Make</label>
+          <AcInput value={line.make} onChange={v=>onChange(line.id,{make:v})} options={MAKES} placeholder="Bridgestone…"/>
+        </div>
+      </div>
+
+      {/* Row 2: Serial # | Br# | Rim# | Service */}
+      <div className="form-row-4 mb8">
+        <div className="fg"><label className="form-label">Serial #</label>
+          <input className="form-input mono" value={line.serialNo} onChange={e=>onChange(line.id,{serialNo:e.target.value})} placeholder="A9J000339"/>
+        </div>
+        <div className="fg"><label className="form-label">Br#</label>
+          <input className="form-input mono" value={line.brNo} onChange={e=>onChange(line.id,{brNo:e.target.value})} placeholder="A129"/>
+        </div>
+        <div className="fg"><label className="form-label">Rim#</label>
+          <input className="form-input mono" value={line.rimNo} onChange={e=>onChange(line.id,{rimNo:e.target.value})} placeholder="R1595"/>
+        </div>
+        <div className="fg"><label className="form-label">Service</label>
+          <SvcPicker value={line.serviceType} onChange={v=>onChange(line.id,{serviceType:v})}/>
+        </div>
+      </div>
+
+      {/* Row 3: Pricing Cat | Qty | Rate | Notes */}
+      <div className="form-row-4">
+        <div className="fg">
+          <label className="form-label">
+            Pricing Category
+            {line.pricingCat&&<span style={{color:"#27ae60",fontWeight:600,fontSize:10,marginLeft:4}}>✓ Auto</span>}
+          </label>
+          <select className="form-input" value={line.pricingCat} onChange={e=>onChange(line.id,{pricingCat:e.target.value})}>
+            <option value="">— Select —</option>
+            {FULL_PRICING.map(p=><option key={p.cat} value={p.cat}>{p.cat}</option>)}
+          </select>
+        </div>
+        <div className="fg"><label className="form-label">Qty / Hrs</label>
+          <input type="number" min="0.25" step="0.25" className="form-input" value={line.qty}
+            onChange={e=>onChange(line.id,{qty:parseFloat(e.target.value)||0})}/>
+        </div>
+        <div className="fg">
+          <label className="form-label">
+            Rate
+            {showSuggest&&<button className="rate-suggest" onClick={()=>onChange(line.id,{rate:br})}>Use {$f(br)} ↑</button>}
+          </label>
+          <input type="number" step="0.01" className="form-input" value={line.rate}
+            onChange={e=>onChange(line.id,{rate:parseFloat(e.target.value)||0})}/>
+        </div>
+        <div className="fg"><label className="form-label">Notes</label>
+          <input className="form-input" value={line.notes}
+            onChange={e=>onChange(line.id,{notes:e.target.value})}
+            placeholder="Junk, spare, diff rim…"/>
+        </div>
+      </div>
+      <div className="line-total">Line Total: <strong>{$f(lTotal(line))}</strong></div>
+    </div>
+  );
+}
+
+// ─── INVOICES VIEW ────────────────────────────────────────────────────────────
+function InvoicesView({wos,onExport,onMarkInvoiced,onEdit}){
+  const [sel,setSel]=useState([]);
+  const [invNums,setInvNums]=useState({});
+  const open=[...wos.filter(w=>w.status==="open")].sort((a,b)=>Number(b.id)-Number(a.id));
+  const done=[...wos.filter(w=>w.status==="invoiced")].sort((a,b)=>Number(b.id)-Number(a.id));
+  const toggle=id=>setSel(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
+  const selWOs=open.filter(w=>sel.includes(w.id));
+  return (
+    <div>
+      <div className="nti-card" style={{marginBottom:24}}>
+        <div className="nti-card-header">
+          <span>Ready to Invoice ({open.length})</span>
+          {sel.length>0&&<div style={{display:"flex",gap:12,alignItems:"center"}}>
+            <span className="muted" style={{fontSize:13}}>{sel.length} WOs · {$f(selWOs.reduce((s,w)=>s+wTotal(w),0))}</span>
+            <button className="btn-primary sm" onClick={()=>onExport(selWOs)}>Export → QBO</button>
+          </div>}
+        </div>
+        {open.length===0?<div className="empty-state">All work orders invoiced.</div>:(
+          <div style={{overflowX:"auto"}}>
+            <table className="nti-table">
+              <thead><tr>
+                <th style={{width:32}}><input type="checkbox" checked={sel.length===open.length&&open.length>0} onChange={()=>setSel(s=>s.length===open.length?[]:open.map(w=>w.id))}/></th>
+                <th>WO #</th><th>Date</th><th>Customer</th><th className="right">Amount</th><th>Invoice #</th><th className="right">Action</th>
+              </tr></thead>
+              <tbody>{open.map(wo=>(
+                <tr key={wo.id} style={{background:sel.includes(wo.id)?"#f0f7ff":""}}>
+                  <td><input type="checkbox" checked={sel.includes(wo.id)} onChange={()=>toggle(wo.id)}/></td>
+                  <td><span className="wo-num">#{wo.id}</span></td>
+                  <td className="muted">{wo.date}</td>
+                  <td className="fw6">{wo.customer}</td>
+                  <td className="right fw6">{$f(wTotal(wo))}</td>
+                  <td><input className="form-input mono" style={{width:120,padding:"4px 8px",fontSize:12}} placeholder="INV-001"
+                    value={invNums[wo.id]||""} onChange={e=>setInvNums(v=>({...v,[wo.id]:e.target.value}))}/></td>
+                  <td className="right" style={{whiteSpace:"nowrap",display:"flex",gap:6,justifyContent:"flex-end"}}>
+                    <button className="action-btn ab-blue"   onClick={()=>onEdit(wo)}>Edit</button>
+                    <button className="action-btn ab-green"  onClick={()=>onExport([wo])}>QBO</button>
+                    <button className="action-btn ab-orange" onClick={()=>{const inv=invNums[wo.id];if(!inv)return alert("Enter invoice # first");onMarkInvoiced(wo,inv);setSel(s=>s.filter(x=>x!==wo.id));}}>✓ Invoiced</button>
+                  </td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="qbo-banner">
+        <div className="qbo-banner-title">📥 QuickBooks Online Import</div>
+        <ol className="qbo-steps">
+          <li>Click <strong>QBO</strong> on any row or <strong>Export → QBO</strong> above to download CSV</li>
+          <li>In QBO: <strong>Settings → Import Data → Invoices</strong></li>
+          <li>Upload <code>NTI_QBO_[date].csv</code> — each WO becomes a draft invoice</li>
+        </ol>
+      </div>
+
+      {done.length>0&&(
+        <div className="nti-card">
+          <div className="nti-card-header"><span>Invoice History ({done.length})</span>
+            <button className="btn-outline" onClick={()=>onExport(done)}>Export All → QBO</button>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table className="nti-table">
+              <thead><tr><th>WO #</th><th>Date</th><th>Customer</th><th className="right">Amount</th><th>Invoice #</th><th className="right">Re-export</th></tr></thead>
+              <tbody>{done.map(wo=>(
+                <tr key={wo.id}>
+                  <td><span className="wo-num">#{wo.id}</span></td>
+                  <td className="muted">{wo.date}</td>
+                  <td className="fw6">{wo.customer}</td>
+                  <td className="right fw6">{$f(wTotal(wo))}</td>
+                  <td><span className="badge badge-green">{wo.invoiceNo}</span></td>
+                  <td className="right"><button className="action-btn ab-green" onClick={()=>onExport([wo])}>QBO</button></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── SETTINGS ─────────────────────────────────────────────────────────────────
+function SettingsView({settings,onSave}){
+  const [f,setF]=useState({...settings,recipStr:(settings.recipients||[]).join(", ")});
+  const save=()=>onSave({...settings,autoEmail:f.autoEmail,ccEmail:f.ccEmail||"",recipients:f.recipStr.split(",").map(s=>s.trim()).filter(Boolean)});
+  return (
+    <div>
+      <div className="nti-card">
+        <div className="nti-card-header">📧 Email Settings</div>
+        <div style={{padding:"24px",display:"flex",flexDirection:"column",gap:20}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingBottom:16,borderBottom:"1px solid #f0f2f4"}}>
+            <div>
+              <div style={{fontWeight:600,fontSize:14,color:"#1a2332"}}>Auto-email on Save</div>
+              <div style={{fontSize:12,color:"#7f8c8d",marginTop:2}}>Sends formatted WO + QBO CSV automatically when a work order is saved</div>
+            </div>
+            <div className="toggle" style={{background:f.autoEmail?"#27ae60":"#ccc"}}
+              onClick={()=>setF(x=>({...x,autoEmail:!x.autoEmail}))}>
+              <div className="toggle-knob" style={{left:f.autoEmail?24:2}}/>
+            </div>
+          </div>
+          <div className="fg">
+            <label className="form-label">To: Recipients (comma-separated)</label>
+            <input className="form-input" value={f.recipStr} onChange={e=>setF(x=>({...x,recipStr:e.target.value}))} placeholder="northerntireinc@gmail.com, billing@customer.com"/>
+          </div>
+          <div className="fg">
+            <label className="form-label">CC: (optional)</label>
+            <input className="form-input" value={f.ccEmail||""} onChange={e=>setF(x=>({...x,ccEmail:e.target.value}))}/>
+          </div>
+          <button className="btn-primary" style={{alignSelf:"flex-start"}} onClick={save}>Save Settings</button>
+        </div>
+      </div>
+      <div className="nti-card">
+        <div className="nti-card-header">☁️ Google Drive</div>
+        <div style={{padding:"20px 24px",fontSize:13,color:"#555",lineHeight:1.8}}>
+          Each auto-email to northerntireinc@gmail.com includes the QBO CSV in the body.
+          In Gmail, click the <strong>Drive icon</strong> to save directly to Drive. 
+          Or install <strong>"Save Emails to Google Drive"</strong> from G Suite Marketplace and set a filter to auto-archive all <em>NTI Work Order</em> subject-line emails to a Drive folder.
+        </div>
+      </div>
+      <div className="nti-card">
+        <div className="nti-card-header">🗄️ Supabase Database</div>
+        <div style={{padding:"20px 24px",fontSize:13,color:"#555",lineHeight:1.8}}>
+          All work orders are stored in your Supabase <code style={{background:"#f0f2f5",padding:"1px 5px",borderRadius:3}}>work_orders</code> table — synced across all devices in real time.
+          Edit credentials and starting WO# in the <code style={{background:"#f0f2f5",padding:"1px 5px",borderRadius:3}}>&lt;script&gt;</code> block at the top of <strong>index.html</strong>.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────────────
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
