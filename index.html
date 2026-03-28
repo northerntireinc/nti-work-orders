@@ -317,6 +317,8 @@ const POSITIONS = ["LF","RF","LRO","LRI","RRO","RRI","LRF","LRR","RRF","RRR",
   "LF1","RF1","LMO","LMI","RMO","RMI","Left Front","Right Front","Left Rear","Right Rear",
   "Front","Rear","1","2","3","4","5","6","7","8","9","10","11","12","Spare"];
 
+const TECHNICIANS = ["Jeremy Forbes","Lee Woods","Vicki Saul","Other"];
+
 const QBO_CUSTOMERS = [
   "41 AUTO SALES","A&L IRON","A. LINDBERG & SONS","ALTA EQUIPMENT COMPANY",
   "APPLIED INDUSTRIAL TECH","ASSOCIATED CONSTRUCTORS","AUTO VALUE OF ISHPEMING",
@@ -374,6 +376,7 @@ async function fetchAllWOs() {
 async function upsertWO(wo) {
   const row = {
     id: wo.id, date: wo.date, customer: wo.customer,
+    technician: wo.technician||"Jeremy Forbes",
     lines: wo.lines, status: wo.status,
     invoice_no: wo.invoiceNo||"", notes: wo.notes||"",
     created_at: wo.createdAt||Date.now(), email_sent: wo.emailSent||false,
@@ -398,6 +401,7 @@ async function getNextId() {
 function rowToWO(r){
   return {
     id: r.id, date: r.date, customer: r.customer,
+    technician: r.technician||"Jeremy Forbes",
     lines: r.lines||[], status: r.status||"open",
     invoiceNo: r.invoice_no||"", notes: r.notes||"",
     createdAt: r.created_at||Date.now(), emailSent: r.email_sent||false,
@@ -462,6 +466,7 @@ function buildEmailHTML(wo){
     <div><div style="font-size:11px;color:#999;text-transform:uppercase">Customer</div><div style="font-size:16px;font-weight:700;color:#1a2332;margin-top:3px">${wo.customer}</div></div>
     <div><div style="font-size:11px;color:#999;text-transform:uppercase">Date</div><div style="font-size:16px;font-weight:600;color:#1a2332;margin-top:3px">${wo.date}</div></div>
     <div><div style="font-size:11px;color:#999;text-transform:uppercase">WO Total</div><div style="font-size:16px;font-weight:700;color:#1a2332;margin-top:3px">${$f(total)}</div></div>
+    <div><div style="font-size:11px;color:#999;text-transform:uppercase">Technician</div><div style="font-size:14px;font-weight:600;color:#1a2332;margin-top:3px">${wo.technician||"Jeremy Forbes"}</div></div>
   </div>
   <div style="padding:20px 28px;overflow-x:auto">
     <table style="width:100%;border-collapse:collapse;min-width:600px"><thead><tr style="background:#1a2332">
@@ -671,7 +676,7 @@ function App(){
 
   const openNew=async()=>{
     const nextId=await getNextId();
-    const wo={id:String(nextId),date:tod(),customer:"CLEVELAND-CLIFFS",lines:[newLine()],status:"open",invoiceNo:"",notes:"",createdAt:Date.now(),emailSent:false};
+    const wo={id:String(nextId),date:tod(),customer:"CLEVELAND-CLIFFS",technician:"Jeremy Forbes",lines:[newLine()],status:"open",invoiceNo:"",notes:"",createdAt:Date.now(),emailSent:false};
     setEditWO(wo);setView("edit");
   };
   const openEdit=(wo)=>{setEditWO(JSON.parse(JSON.stringify(wo)));setView("edit");};
@@ -743,7 +748,7 @@ function Dashboard({wos,sending,onEdit,onDelete,onExport,onResend,autoEmail}){
           <div style={{overflowX:"auto"}}>
             <table className="nti-table">
               <thead><tr>
-                <th>WO #</th><th>Date</th><th>Customer</th>
+                <th>WO #</th><th>Date</th><th>Customer</th><th>Technician</th>
                 <th className="right">Amount</th><th className="center">Status</th>
                 <th className="center">Email</th><th className="right">Actions</th>
               </tr></thead>
@@ -754,6 +759,7 @@ function Dashboard({wos,sending,onEdit,onDelete,onExport,onResend,autoEmail}){
                     <td><span className="wo-num">#{wo.id}</span></td>
                     <td className="muted">{wo.date}</td>
                     <td className="fw6">{wo.customer}</td>
+                    <td className="muted">{wo.technician||"Jeremy Forbes"}</td>
                     <td className="right fw6">{$f(wTotal(wo))}</td>
                     <td className="center">{wo.status==="open"?<span className="badge badge-orange">Open</span>:<span className="badge badge-green">#{wo.invoiceNo}</span>}</td>
                     <td className="center">
@@ -840,6 +846,17 @@ function WOForm({wo,onSave,onCancel,autoEmail}){
             <textarea className="form-input" rows={2} value={form.notes}
               onChange={e=>setF("notes",e.target.value)}
               placeholder="e.g. Remount on different rim, junk tire, prior approval…"/>
+          </div>
+
+          <div className="fg mb16">
+            <label className="form-label">Technician</label>
+            <input className="form-input" value={form.technician||""}
+              onChange={e=>setF("technician",e.target.value)}
+              placeholder="Jeremy Forbes"
+              list="tech-list"/>
+            <datalist id="tech-list">
+              {TECHNICIANS.map(t=><option key={t} value={t}/>)}
+            </datalist>
           </div>
 
           <div className="wo-total-row">
